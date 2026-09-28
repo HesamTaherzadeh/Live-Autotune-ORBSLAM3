@@ -1,10 +1,5 @@
 # Live-Autotune-ORBSLAM3
 
-ORB-SLAM3 fork with live, per-keyframe local bundle-adjustment covariance autotuning: every
-local BA call re-estimates edge information (measurement covariance) online per ORB-pyramid
-octave, instead of using fixed weights. Pass `-` for the autotune config to run vanilla
-ORB-SLAM3 with none of this.
-
 ## Running it
 
 `stereo_kitti` (and the other `Examples/*` binaries) takes a fixed argument list:
@@ -23,46 +18,38 @@ ORB-SLAM3 with none of this.
     /data/KITTI/07 configs/example_autotune.yaml 0 1 1.0 /tmp/run_00
 ```
 
-## Autotune config
 
-Only the fields below are read (`AutotuneConfig` in `include/Autotune.h` has the defaults for
-anything you omit) — this is the full, real schema, not a superset:
+----
 
-```yaml
-%YAML:1.0
----
-autotune:
-  outer_iterations: 4       # BA passes per keyframe
-  inner_iterations: 25      # optimizer iterations per pass
-  tune_iterations: 10       # covariance re-estimation rounds per pass
-  pre_iterations: 2         # warm-up passes before tuning starts
-  post_iterations: 2        # passes after tuning stops (weights held fixed)
-  prior_strength: 0.1       # weight of the prior vs. the empirical estimate
-  use_wishart_prior: 1      # seed the per-octave covariance with a Wishart prior
-  use_identity_prior: 0     # if 1, skip the empirical estimate; identity throughout
-  use_k_as_denom: 0
-  diagonal_constraint: 0
-  huber_delta_mono: 2.4477540726
-  huber_delta_stereo: 2.7954784921
-  verbose: 1
+## Running it via VSLAM-LAB
 
-solver:
-  min_eig_cov: 1.0e-03
-  max_eig_cov: 100.0
-  octave_bands:              # group ORB pyramid octaves that share one tuned covariance
-    - octaves: [0]
-    - octaves: [1]
-    - octaves: [2]
-    - octaves: [3]
-    - octaves: [4]
-    - octaves: [5]
-    - octaves: [6]
-    - octaves: [7]
-```
+This repo is meant to sit at `VSLAM-LAB/Baselines/ORB-SLAM3-DEV/` inside a VSLAM-LAB checkout --
+VSLAM-LAB builds it and drives the CLI above for you; you don't call `stereo_kitti` directly.
 
-## Forming an experiment
-
-One run = one `(sequence, autotune_config)` pair, invoked as above. A sweep — multiple
-sequences, multiple tuning configs, Monte-Carlo repeats, ATE evaluation — is just this binary
-called once per combination; that orchestration lives outside this repo (in VSLAM-LAB), not
-here. This binary only ever needs the 8 arguments above to run standalone.
+1. **`pixi.toml`**'s `orbslam3-dev` environment maps its `execute-stereo` task straight onto the
+   CLI above:
+   ```toml
+   [feature.orbslam3-dev.tasks]
+   execute-stereo = { cmd = "python ../extra-files/orbslam3_upstream/vslamlab_orbslam3_upstream_stereo.py",
+                       cwd = "Baselines/ORB-SLAM3-DEV" }
+   ```
+2. **An experiment yaml** (`VSLAM-LAB/configs/exp_vslamlab.yaml`) selects this baseline via
+   `Module: orbslam3-dev`; its `Parameters` become the `autotune_config`/`loop_closing`/`viewer`/
+   `playback_speed` args:
+   ```yaml
+   exp_k0_prior:
+     Config: /workspace/shared/config_kitti_567.yaml   # which sequences, e.g. KITTI 05/06/07
+     NumRuns: 10                                       # Monte-Carlo repeats per sequence
+     Parameters:
+       mode: stereo
+       autotune_config: /workspace/shared/experiment_manual_identity_prior_k0.yaml
+       viewer: 1
+       playback_speed: "0.5"
+     Module: orbslam3-dev
+   ```
+3. **Run the sweep**:
+   ```bash
+   cd VSLAM-LAB && pixi run vslamlab configs/exp_vslamlab.yaml --overwrite
+   ```
+   This loops every (sequence x repeat), builds the CLI above once per run, then evaluates and
+   compares results -- see VSLAM-LAB's own docs for `Config`/results-folder details.
